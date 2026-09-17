@@ -164,9 +164,10 @@ class _LaunchHomePageState extends State<LaunchHomePage> {
         }
         return;
       }
-      // 游戏进程已起来：主动最小化并休眠降载
+      // 游戏进程已起来：最小化休眠不挡出窗口（PowerShell 降优先级放到后台）
       if (cfg.launchMinimizeOnStart) {
-        await context.read<LauncherSleepController>().enter(onLog: _log);
+        // ignore: unawaited_futures
+        context.read<LauncherSleepController>().enter(onLog: _log);
       }
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -200,7 +201,8 @@ class _LaunchHomePageState extends State<LaunchHomePage> {
       await _refreshBedrock();
       final cfg = context.read<AppConfig>();
       if (cfg.launchMinimizeOnStart) {
-        await context.read<LauncherSleepController>().enter(onLog: _log);
+        // ignore: unawaited_futures
+        context.read<LauncherSleepController>().enter(onLog: _log);
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

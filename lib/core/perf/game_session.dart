@@ -70,6 +70,9 @@ class GameSession extends ChangeNotifier {
     if (showHud) {
       () async {
         try {
+          // 等游戏出窗口后再挂悬浮窗，避免第二个 Flutter 进程抢 CPU/GPU
+          await Future<void>.delayed(const Duration(seconds: 6));
+          if (gen != _attachGen || _process == null) return;
           final recordDir =
               await resolveRecordSaveDir(perf?.config.recordSaveDir ?? '');
           final ffmpeg = perf?.config.ffmpegPath.trim();

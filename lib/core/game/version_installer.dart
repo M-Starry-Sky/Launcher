@@ -231,6 +231,29 @@ class VersionInstaller {
   static bool needsForcedReinstall(Directory gameDir, String versionId) =>
       reinstallStamp(gameDir, versionId).existsSync();
 
+  /// 本机是否已有某游戏版本的 Fabric profile；有则返回 loader 版本号。
+  static String? findLocalFabricLoader(Directory gameDir, String gameVersion) {
+    final versions = Directory(p.join(gameDir.path, 'versions'));
+    if (!versions.existsSync()) return null;
+    final prefix = 'fabric-loader-';
+    final suffix = '-$gameVersion';
+    String? best;
+    try {
+      for (final e in versions.listSync(followLinks: false)) {
+        if (e is! Directory) continue;
+        final name = p.basename(e.path);
+        if (!name.startsWith(prefix) || !name.endsWith(suffix)) continue;
+        final mid = name.substring(prefix.length, name.length - suffix.length);
+        if (mid.isEmpty) continue;
+        final json = File(p.join(e.path, '$name.json'));
+        if (!json.existsSync()) continue;
+        best = mid;
+        break;
+      }
+    } catch (_) {}
+    return best;
+  }
+
   /// 本地是否已可直接启动（免安装检查）。对齐主流启动器的「已安装即秒启」。
   static bool isWarmReady({
     required Directory gameDir,
@@ -280,6 +303,75 @@ class VersionInstaller {
       if (!profile.existsSync()) return false;
     }
     return true;
+  }
+
+  /// 缺资产戳但本地文件看起来齐全时，抽样校验后补写戳。
+  ///
+  /// 对齐 PCL/HMCL「已安装即信任」：避免每次启动对 `assets/objects` 全量扫盘
+  ///（缺戳时常见 2–3 分钟慢启）。抽样失败则返回 false，由安装流程完整补齐。
+  static Future<bool> healAssetsStampIfPossible(
+    Directory gameDir,
+    String gameVersion, {
+    void Function(String message)? onLog,
+  }) async {
+    if (needsForcedReinstall(gameDir, gameVersion)) return false;
+    final versionDir = Directory(p.join(gameDir.path, 'versions', gameVersion));
+    final jsonFile = File(p.join(versionDir.path, '$gameVersion.json'));
+    final jar = File(p.join(versionDir.path, '$gameVersion.jar'));
+    if (!jsonFile.existsSync() || !jar.existsSync()) return false;
+    try {
+      if (jar.lengthSync() < 1024 * 100) return false;
+    } catch (_) {
+      return false;
+    }
+
+    try {
+      final versionJson =
+          jsonDecode(jsonFile.readAsStringSync()) as Map<String, dynamic>;
+      final assetIndex = (versionJson['assetIndex'] as Map?) ?? {};
+      final indexName = '${assetIndex['id'] ?? gameVersion}';
+      final indexesDir = Directory(p.join(gameDir.path, 'assets', 'indexes'));
+      final objectsDir = Directory(p.join(gameDir.path, 'assets', 'objects'));
+      final stamp = File(p.join(objectsDir.path, '.xq_assets_ok_$indexName'));
+      final indexFile = File(p.join(indexesDir.path, '$indexName.json'));
+      if (!indexFile.existsSync() || !objectsDir.existsSync()) return false;
+
+      final indexJson = jsonDecode(indexFile.readAsStringSync()) as Map;
+      final objects = (indexJson['objects'] as Map?) ?? {};
+      final total = objects.length;
+      if (total <= 0) return false;
+
+      if (stamp.existsSync()) {
+        final stamped = int.tryParse(stamp.readAsStringSync().trim());
+        if (stamped == total) return true;
+      }
+
+      // 抽样若干 hash：毫秒级 exists，避免全树 list
+      const sampleCap = 12;
+      var checked = 0;
+      var ok = 0;
+      for (final entry in objects.entries) {
+        if (checked >= sampleCap) break;
+        final info = entry.value;
+        if (info is! Map) continue;
+        final hash = info['hash']?.toString();
+        if (hash == null || hash.length < 3) continue;
+        checked++;
+        final f = File(p.join(objectsDir.path, hash.substring(0, 2), hash));
+        if (f.existsSync()) ok++;
+      }
+      if (checked == 0 || ok < checked) {
+        onLog?.call('资产抽样未通过（$ok/$checked），将走完整检查');
+        return false;
+      }
+
+      await stamp.writeAsString('$total');
+      onLog?.call('已补写资产就绪戳（$total，抽样 $ok/$checked），跳过全量扫盘');
+      return true;
+    } catch (e) {
+      onLog?.call('补写资产戳失败: $e');
+      return false;
+    }
   }
 
   static Future<void> clearReinstallStamp(
@@ -395,14 +487,22 @@ class VersionInstaller {
     final versionDir = Directory('${gameDir.path}/versions/$versionId');
 
     // 暖启动：已装齐则整段跳过（房间路径等未走 LaunchService 时同样受益）
-    if (!force &&
-        isWarmReady(
-          gameDir: gameDir,
-          gameVersion: versionId,
-          loaderType: 'none',
-        )) {
-      _log('原版 $versionId 本地已就绪，跳过安装检查');
-      return;
+    if (!force) {
+      if (!isWarmReady(
+        gameDir: gameDir,
+        gameVersion: versionId,
+        loaderType: 'none',
+      )) {
+        await healAssetsStampIfPossible(gameDir, versionId, onLog: _log);
+      }
+      if (isWarmReady(
+        gameDir: gameDir,
+        gameVersion: versionId,
+        loaderType: 'none',
+      )) {
+        _log('原版 $versionId 本地已就绪，跳过安装检查');
+        return;
+      }
     }
 
     if (force || needsForcedReinstall(gameDir, versionId)) {
@@ -863,8 +963,14 @@ class VersionInstaller {
   }
 
   /// 解析版本继承链（fabric profile → 原版）为启动所需结构。
+  ///
+  /// [trustClasspath]：暖启动时信任本地库已齐全，跳过数百次 existsSync
+  ///（对齐主流启动器「已装即拉起」）。
   Future<ResolvedVersion> resolveVersionChain(
-      String profileId, Directory gameDir) async {
+    String profileId,
+    Directory gameDir, {
+    bool trustClasspath = false,
+  }) async {
     var json = await _readVersionJson(profileId, gameDir);
     final chain = <Map<String, dynamic>>[json];
     while (json['inheritsFrom'] != null) {
@@ -872,6 +978,23 @@ class VersionInstaller {
           gameDir);
       chain.insert(0, parent);
       json = parent;
+    }
+
+    // 任一版本目录有库戳即可信任 classpath（完整装过）
+    var trust = trustClasspath;
+    if (!trust) {
+      for (final layer in chain) {
+        final id = layer['id'] as String?;
+        if (id == null) continue;
+        final stamp = File(p.join(gameDir.path, 'versions', id, '.xq_libs_ok'));
+        if (stamp.existsSync()) {
+          final n = int.tryParse(stamp.readAsStringSync().trim()) ?? 0;
+          if (n > 0) {
+            trust = true;
+            break;
+          }
+        }
+      }
     }
 
     final libraryDir = '${gameDir.path}/libraries';
@@ -914,13 +1037,17 @@ class VersionInstaller {
           ((layer['assetIndex'] as Map?)?['id']) as String? ?? assetsIndexName;
     }
 
-    final existFlags = List<bool>.generate(
-      candidatePaths.length,
-      (i) => File(candidatePaths[i]).existsSync(),
-      growable: false,
-    );
-    for (var i = 0; i < candidatePaths.length; i++) {
-      if (existFlags[i]) classpath.add(candidatePaths[i]);
+    if (trust) {
+      classpath.addAll(candidatePaths);
+    } else {
+      final existFlags = List<bool>.generate(
+        candidatePaths.length,
+        (i) => File(candidatePaths[i]).existsSync(),
+        growable: false,
+      );
+      for (var i = 0; i < candidatePaths.length; i++) {
+        if (existFlags[i]) classpath.add(candidatePaths[i]);
+      }
     }
 
     for (final nd in nativeDirs) {

@@ -1,6 +1,6 @@
 ﻿{
-  "version": "0.2.5",
-  "notes": "Android 启动图；移动端壳；JE/基岩启动相关修复。",
-  "download_url": "https://github.com/M-Starry-Sky/Launcher/releases/download/v0.2.5/XingqiongLauncher-0.2.5-Windows-x64-Setup.exe",
-  "release_url": "https://github.com/M-Starry-Sky/Launcher/releases/tag/v0.2.5"
+  "version": "0.2.6",
+  "notes": "秒启快照；内置 Java 运行时目录；修复 26.x 优化模组误报失败四个；资源戳热启动。",
+  "download_url": "https://github.com/M-Starry-Sky/Launcher/releases/download/v0.2.6/XingqiongLauncher-0.2.6-Windows-x64-Setup.exe",
+  "release_url": "https://github.com/M-Starry-Sky/Launcher/releases/tag/v0.2.6"
 }

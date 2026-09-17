@@ -199,7 +199,7 @@ class JavaEnvAdapter {
     if (allowSettingsOverride) {
       final configured = config.javaPath;
       if (configured != 'java' && File(configured).existsSync()) {
-        final p = await probe(configured, bypassCache: true);
+        final p = await probe(configured);
         if (p != null &&
             p.is64Bit &&
             p.major != null &&
@@ -224,7 +224,8 @@ class JavaEnvAdapter {
     for (final major in _preferMajors(need, max)) {
       final existing = await installer.findInstalled(major);
       if (existing == null) continue;
-      final p = await probe(existing, isolated: true, bypassCache: true);
+      // 已落盘的绿色 JDK 走缓存探测，避免每次启动都 java -version
+      final p = await probe(existing, isolated: true);
       if (p != null &&
           p.is64Bit &&
           p.major != null &&
@@ -233,10 +234,11 @@ class JavaEnvAdapter {
             gameVersion,
             fromMeta: javaMajorFromMeta,
           )) {
-        onLog?.call('使用隔离 Java ${p.major}: $existing');
+        onLog?.call('使用内置/隔离 Java ${p.major}: $existing');
         return (path: existing, probe: p, warning: null);
       }
       onLog?.call('隔离目录 Java $major 无法运行，将重新安装…');
+      clearProbeCache();
       await installer.reinstall(major);
     }
 

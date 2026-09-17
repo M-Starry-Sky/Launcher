@@ -89,6 +89,7 @@ public class XingqiongHudBridge implements ClientModInitializer {
                     float td = deltaTracker.getGameTimeDeltaPartialTick(false);
                     MinimapRenderer.render(graphics, td);
                     InfoHudRenderer.render(graphics, td);
+                    CombatHud.renderHud(graphics, td);
                 }
         );
 

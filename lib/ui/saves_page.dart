@@ -515,7 +515,8 @@ class _SavesPageState extends State<SavesPage> {
             autoInstall: cfg.launchAutoInstall,
           );
       if (cfg.launchMinimizeOnStart && mounted) {
-        await context.read<LauncherSleepController>().enter();
+        // ignore: unawaited_futures
+        context.read<LauncherSleepController>().enter();
       }
       if (mounted) {
         messenger.showSnackBar(

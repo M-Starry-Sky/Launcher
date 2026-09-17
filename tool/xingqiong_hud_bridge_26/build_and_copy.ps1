@@ -1,5 +1,5 @@
 # 构建 Minecraft 26.x「星穹优化」并复制到启动器 assets
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
@@ -20,7 +20,7 @@ if ($env:JAVA_HOME) {
   Write-Host "JAVA_HOME=$env:JAVA_HOME"
 }
 
-& "$root\gradlew.bat" build --no-daemon
+& cmd /c "`"$root\gradlew.bat`" build --no-daemon"
 if ($LASTEXITCODE -ne 0) { throw "gradle build failed: $LASTEXITCODE" }
 
 $libs = Join-Path $root 'build\libs'
@@ -35,4 +35,4 @@ $destDir = [System.IO.Path]::GetFullPath((Join-Path $root '..\..\assets\mods'))
 New-Item -ItemType Directory -Force -Path $destDir | Out-Null
 $dest = Join-Path $destDir 'xingqiong-perf-26.jar'
 Copy-Item -LiteralPath $jar.FullName -Destination $dest -Force
-Write-Host "OK -> $dest"
+Write-Host "OK -> $dest ($($jar.Length) B)"

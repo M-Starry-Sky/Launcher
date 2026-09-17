@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/auth/platform_utils.dart';
 import '../../core/config/app_config.dart';
+import '../../core/game/mobile_launch_limits.dart';
 import '../../core/perf/launcher_sleep.dart';
 import '../../services/home_banner_service.dart';
 import '../app_theme.dart';
@@ -18,10 +19,18 @@ class HomeBannerCarousel extends StatefulWidget {
 }
 
 class _HomeBannerCarouselState extends State<HomeBannerCarousel> {
-  static const _fallbackAssets = <String>[
-    'assets/images/splash_background.png',
+  static const _fallbackAssetsDesktop = <String>[
+    'assets/images/splash_background_desktop.png',
     'assets/images/default_background.png',
   ];
+
+  static const _fallbackAssetsMobile = <String>[
+    'assets/images/splash_background_mobile.png',
+  ];
+
+  List<String> get _fallbackAssets => MobileLaunchLimits.isMobile
+      ? _fallbackAssetsMobile
+      : _fallbackAssetsDesktop;
 
   List<HomeBanner> _banners = const [];
   bool _useLocalFallback = false;

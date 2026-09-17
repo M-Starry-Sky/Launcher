@@ -1003,11 +1003,23 @@ class _RoomPageState extends State<RoomPage> {
       final installer =
           VersionInstaller(onProgress: _appendLog, config: appConfig);
       try {
-        final warm = VersionInstaller.isWarmReady(
+        var warm = VersionInstaller.isWarmReady(
           gameDir: gameRoot,
           gameVersion: gameVersion,
           loaderType: 'none',
         );
+        if (!warm) {
+          await VersionInstaller.healAssetsStampIfPossible(
+            gameRoot,
+            gameVersion,
+            onLog: _appendLog,
+          );
+          warm = VersionInstaller.isWarmReady(
+            gameDir: gameRoot,
+            gameVersion: gameVersion,
+            loaderType: 'none',
+          );
+        }
         if (warm) {
           _appendLog('本地已就绪，跳过安装检查（快速启动）');
         } else {

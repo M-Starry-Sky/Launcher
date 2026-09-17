@@ -5,7 +5,7 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $root
 Set-Location $root
 
-$version = '0.2.5'
+$version = '0.2.6'
 $env:PATH = 'E:\flutter\bin;' + $env:PATH
 $env:FLUTTER_STORAGE_BASE_URL = 'https://storage.flutter-io.cn'
 $env:PUB_HOSTED_URL = 'https://pub.flutter-io.cn'
@@ -32,6 +32,17 @@ if (Test-Path $portableDir) { Remove-Item $portableDir -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
 Copy-Item (Join-Path $releaseDir '*') $portableDir -Recurse -Force
 Copy-Item (Join-Path $root 'assets\images\logo.png') (Join-Path $portableDir 'logo.png') -Force
+# Bundled Java runtime dir (Temurin downloads here; optional preseed jdk-17/jdk-21)
+$runtimeJava = Join-Path $portableDir 'runtimes\java'
+New-Item -ItemType Directory -Force -Path $runtimeJava | Out-Null
+$readme = @"
+Xingqiong launcher bundled Java runtime
+
+Layout: runtimes/java/jdk-17/ or jdk-21/ (need bin/java.exe)
+If empty on first launch, Temurin is downloaded here (or C:\xingqiong\runtimes\java).
+Preseed JDK for offline fast start.
+"@
+Set-Content -Path (Join-Path $runtimeJava 'README.txt') -Value $readme -Encoding UTF8
 if (Test-Path $portableZip) { Remove-Item $portableZip -Force }
 Compress-Archive -Path (Join-Path $portableDir '*') -DestinationPath $portableZip -Force
 if (-not (Test-Path $portableZip) -or ((Get-Item $portableZip).Length -lt 1MB)) {

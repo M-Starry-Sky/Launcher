@@ -625,7 +625,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _field(
           'Java 路径',
           _java,
-          hint: '留空则按游戏版本使用隔离绿色 JDK',
+          hint: '留空则用启动器内置绿色 JDK（runtimes/java）',
         ),
         _field('堆内存 (MB)', _memory, number: true, hint: 'Xms 与 Xmx 相同'),
         Text(

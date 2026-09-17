@@ -158,7 +158,7 @@ class PerfModsInstaller {
       );
       final coreOk = await ensureCoreJar(
         modsDir,
-        force: true,
+        force: false,
         gameVersion: gv,
       );
       if (coreOk) {
@@ -178,15 +178,27 @@ class PerfModsInstaller {
             : _fabricEngines)
         .where((e) => _engineAllowedFor(gv, e.slug))
         .toList();
+    if (needsUnobfuscatedCore(gv)) {
+      onLog?.call(
+        '日历版 $gv：跳过暂无适配的引擎（entityculling/ferrite-core/modernfix/krypton/indium）',
+      );
+    }
 
     // 日历版（26.x）禁止 1.20 邻近回退，必须精确命中
     final allowNear = !needsUnobfuscatedCore(gv);
+    // 同版本已装过：无 MC 标记的引擎 jar 可信任，避免每次启动重下
+    final trustUnmarked = prev == gv;
 
     onLog?.call('按 $gv 精确拉取加速引擎 ${engines.length} 项…');
     final jarNames = _listJarNames(modsDir);
     final missing = <_EngineDep>[];
     for (final dep in engines) {
-      if (_hasCompatibleEngineJar(jarNames, dep.slug, gv)) {
+      if (_hasCompatibleEngineJar(
+        jarNames,
+        dep.slug,
+        gv,
+        trustUnmarked: trustUnmarked,
+      )) {
         skip++;
       } else {
         // 同 slug 但错版：先移走再下
@@ -215,11 +227,21 @@ class PerfModsInstaller {
             ok++;
             onLog?.call('已安装 ${dep.slug}（$gv）');
           } catch (e) {
-            fail++;
-            if (dep.required) {
-              onLog?.call('必要依赖 ${dep.slug} 无 $gv 版本: $e');
+            final msg = '$e';
+            final noVersion = msg.contains('未找到') ||
+                msg.contains('无 $gv') ||
+                msg.contains('精确匹配') ||
+                msg.contains('不适配');
+            if (!dep.required && noVersion) {
+              // 可选模组无对应版本：不算失败，避免「失败四个」误报
+              skip++;
+              onLog?.call('可选 ${dep.slug}：暂无 $gv 包，已跳过');
+            } else if (dep.required) {
+              fail++;
+              onLog?.call('必要依赖 ${dep.slug} 安装失败: $e');
             } else {
-              onLog?.call('可选依赖 ${dep.slug} 跳过（无 $gv）');
+              fail++;
+              onLog?.call('可选 ${dep.slug} 下载失败: $e');
             }
           }
         }
@@ -231,7 +253,7 @@ class PerfModsInstaller {
 
     await _writeInstalledMeta(modsDir, gv, loader);
     onLog?.call(
-      '星穹优化安装结束（目标 $gv）· 写入 $ok · 已有 $skip · 失败/不可用 $fail',
+      '星穹优化安装结束（目标 $gv）· 写入 $ok · 已有/跳过 $skip · 失败 $fail',
     );
     return (ok: ok, skip: skip, fail: fail);
   }
@@ -253,20 +275,6 @@ class PerfModsInstaller {
     final targetName = gameVersion != null
         ? coreJarNameFor(gameVersion)
         : jarName;
-    _searched = false;
-    _cachedJar = null;
-    final src = _findBundledJar(prefer26: want26);
-    if (src == null) {
-      onLog?.call(
-        want26
-            ? '未找到 $jarName26（请构建 tool/xingqiong_hud_bridge_26）。'
-                '当前工作目录: ${Directory.current.path}'
-            : '未找到 $jarName（请确认 assets/mods 或重新构建 tool/xingqiong_hud_bridge）。'
-                '当前工作目录: ${Directory.current.path}',
-      );
-      return false;
-    }
-    onLog?.call('星穹优化核心源: ${src.path}');
     await modsDir.create(recursive: true);
     _removeLegacyJars(modsDir);
     // 避免 1.20 Yarn jar 与 26 去混淆 jar 同目录混装
@@ -279,6 +287,27 @@ class PerfModsInstaller {
       } catch (_) {}
     }
     final dest = File(p.join(modsDir.path, targetName));
+    // 暖路径：目标已在且未强制，跳过打包源搜索
+    if (!force && dest.existsSync() && dest.lengthSync() > 1024) {
+      onLog?.call('星穹优化已在位 → ${dest.path}');
+      return true;
+    }
+    if (force) {
+      _searched = false;
+      _cachedJar = null;
+    }
+    final src = _findBundledJar(prefer26: want26);
+    if (src == null) {
+      onLog?.call(
+        want26
+            ? '未找到 $jarName26（请构建 tool/xingqiong_hud_bridge_26）。'
+                '当前工作目录: ${Directory.current.path}'
+            : '未找到 $jarName（请确认 assets/mods 或重新构建 tool/xingqiong_hud_bridge）。'
+                '当前工作目录: ${Directory.current.path}',
+      );
+      return false;
+    }
+    onLog?.call('星穹优化核心源: ${src.path}');
     try {
       if (!force &&
           dest.existsSync() &&
@@ -362,7 +391,7 @@ class PerfModsInstaller {
       if (!lower.endsWith('.jar')) continue;
       final compact = lower.replaceAll('-', '').replaceAll('_', '');
       if (!needles.any(compact.contains)) continue;
-      if (_jarCompatibleWithGame(lower, gv)) continue;
+      if (!_shouldQuarantineAsIncompatible(lower, gv)) continue;
       await hold.create(recursive: true);
       final dest = File(p.join(hold.path, name));
       try {
@@ -398,24 +427,51 @@ class PerfModsInstaller {
     return scrubbed;
   }
 
-  /// 26.x：Indium / Sodium Extra 无对应或已并入，不拉取。
+  /// 按游戏版本过滤引擎：避免对无包版本硬拉导致「失败 N 个」。
   bool _engineAllowedFor(String gv, String slug) {
-    if (!needsUnobfuscatedCore(gv)) return true;
-    const drop = {'indium', 'sodium-extra'};
-    return !drop.contains(slug.toLowerCase());
+    final s = slug.toLowerCase();
+    if (needsUnobfuscatedCore(gv)) {
+      // 26.x：Modrinth 上常缺这些；Indium 已并入新 Sodium
+      const drop26 = {
+        'indium',
+        'entityculling',
+        'ferrite-core',
+        'modernfix',
+        'krypton',
+      };
+      return !drop26.contains(s);
+    }
+    // 1.21.4+：Indium 无独立包（Sodium 自带 FRAPI）
+    if (s == 'indium' && _mcAtLeast(gv, 1, 21, 4)) return false;
+    return true;
+  }
+
+  static bool _mcAtLeast(String gv, int maj, int min, int pat) {
+    final m = RegExp(r'^(\d+)\.(\d+)(?:\.(\d+))?').firstMatch(gv.trim());
+    if (m == null) return false;
+    final a = int.parse(m.group(1)!);
+    final b = int.parse(m.group(2)!);
+    final c = int.tryParse(m.group(3) ?? '0') ?? 0;
+    if (a != maj) return a > maj;
+    if (b != min) return b > min;
+    return c >= pat;
   }
 
   /// 同 slug 且文件名表明适配 [gv] 才视为「已有」。
+  /// [trustUnmarked]：meta 已记录同版本成功安装时，允许无 MC 标记的引擎跳过重下。
   bool _hasCompatibleEngineJar(
     List<String> jarNames,
     String slug,
-    String gv,
-  ) {
+    String gv, {
+    bool trustUnmarked = false,
+  }) {
     final needle = slug.toLowerCase().replaceAll('-', '');
     for (final name in jarNames) {
       final compact = name.replaceAll('-', '').replaceAll('_', '');
       if (!compact.contains(needle)) continue;
-      if (_jarCompatibleWithGame(name, gv)) return true;
+      if (_jarCompatibleWithGame(name, gv, trustUnmarked: trustUnmarked)) {
+        return true;
+      }
     }
     return false;
   }
@@ -438,7 +494,7 @@ class PerfModsInstaller {
       if (!lower.endsWith('.jar')) continue;
       final compact = lower.replaceAll('-', '').replaceAll('_', '');
       if (!compact.contains(needle)) continue;
-      if (_jarCompatibleWithGame(lower, gv)) continue;
+      if (!_shouldQuarantineAsIncompatible(lower, gv)) continue;
       await hold.create(recursive: true);
       final dest = File(p.join(hold.path, name));
       try {
@@ -449,37 +505,47 @@ class PerfModsInstaller {
     }
   }
 
-  /// 文件名是否像适配 [gv]。日历版上：带 1.20/1.21 标记 → 否；Via 系 → 否。
-  bool _jarCompatibleWithGame(String fileNameLower, String gv) {
+  /// 仅隔离「明确不适配」的 jar（有错误 MC 标记 / Via / 旧 Cloth）。
+  /// 无标记的引擎不因日历版而误删——避免每次启动清掉再重下。
+  bool _shouldQuarantineAsIncompatible(String fileNameLower, String gv) {
     final n = fileNameLower.toLowerCase();
     final compact = n.replaceAll('-', '').replaceAll('_', '');
     if (needsUnobfuscatedCore(gv)) {
-      // ViaFabricPlus / TRansition / TRender 尚无可靠 26.x 包
       if (compact.contains('viafabric') ||
           compact.contains('transition') ||
           compact.contains('trender')) {
-        return false;
+        return true;
       }
     }
-    // Cloth Config：26.x 需要 ≥16（More Culling 等依赖）；11.x 是 1.20 旧线
     if (compact.contains('clothconfig')) {
       final vm = RegExp(r'cloth[-_]?config[-_]?(\d+)').firstMatch(n);
       final major = vm != null ? int.tryParse(vm.group(1)!) : null;
       if (needsUnobfuscatedCore(gv)) {
-        return major != null && major >= 16;
+        return major == null || major < 16;
       }
-      // 传统 1.20 线常用 11.x
-      if (major != null && major >= 16) {
-        // 高版本 cloth 一般仍兼容，放行
-        return true;
-      }
-      return major == null || major >= 11;
+      return major != null && major < 11;
     }
+    final markers = _extractMcMarkers(n);
+    if (markers.isEmpty) return false;
+    return !markers.any((m) => _mcVersionsCompatible(m, gv));
+  }
+
+  /// 文件名是否像适配 [gv]。日历版上：带 1.20/1.21 标记 → 否；Via 系 → 否。
+  bool _jarCompatibleWithGame(
+    String fileNameLower,
+    String gv, {
+    bool trustUnmarked = false,
+  }) {
+    // 明确不适配 → 否
+    if (_shouldQuarantineAsIncompatible(fileNameLower, gv)) return false;
+    final n = fileNameLower.toLowerCase();
+    final compact = n.replaceAll('-', '').replaceAll('_', '');
+    // Cloth 已在 quarantine 规则里处理；走到这里即视为可兼容
+    if (compact.contains('clothconfig')) return true;
 
     final markers = _extractMcMarkers(n);
     if (markers.isEmpty) {
-      // 日历版：无 MC 标记的引擎不可信任为「已适配」，强制重拉
-      if (needsUnobfuscatedCore(gv)) return false;
+      if (needsUnobfuscatedCore(gv)) return trustUnmarked;
       return true;
     }
     return markers.any((m) => _mcVersionsCompatible(m, gv));

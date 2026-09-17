@@ -117,7 +117,7 @@ class GameLauncher {
     // 主类与游戏参数（含中文存档名、空字符串）必须走进程参数列表——
     // argfile 会把空行当空白合并，导致 --clientId/--xuid 错位，
     // 进而 --quickPlaySingleplayer 吃错值，出现「无法找到具有标识的世界」。
-    final useArgFile = Platform.isWindows && classpath.length >= 4000;
+    final useArgFile = Platform.isWindows && classpath.length >= 800;
     late final Process process;
     if (useArgFile) {
       final argFile =
@@ -146,7 +146,9 @@ class GameLauncher {
         mainClass,
         ...gameArgs,
       ];
-      log?.call('启动命令: $javaPath ${mainArgs.join(' ')}');
+      log?.call(
+        '启动: $javaPath · classpath ${version.classpath.length} · 参数 ${mainArgs.length}',
+      );
       process = await Process.start(
         javaPath,
         mainArgs,

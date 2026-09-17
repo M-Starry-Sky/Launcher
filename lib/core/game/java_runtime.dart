@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../config/app_config.dart';
+import '../perf/portable_java_installer.dart';
 
 /// Java 运行时探测（系统候选）；游戏启动优先走隔离绿色包。
 class JavaRuntime {
@@ -69,12 +70,25 @@ class JavaRuntime {
     } catch (_) {}
 
     if (Platform.isWindows) {
+      // 启动器旁内置运行时
+      final bundled = PortableJavaInstaller.bundledRoot();
+      if (bundled != null) {
+        try {
+          if (bundled.existsSync()) {
+            for (final entry in bundled.listSync(recursive: true)) {
+              if (entry is! File) continue;
+              final name = entry.path.toLowerCase();
+              if (name.endsWith(r'\bin\java.exe')) add(entry.path);
+            }
+          }
+        } catch (_) {}
+      }
       for (final dir in const [
+        r'C:\xingqiong\runtimes\java',
         r'E:\JAVA',
         r'C:\Program Files\Java',
         r'C:\Program Files\Eclipse Adoptium',
         r'C:\Program Files\Microsoft',
-        r'C:\xingqiong\runtimes\java',
       ]) {
         final base = Directory(dir);
         if (!base.existsSync()) continue;

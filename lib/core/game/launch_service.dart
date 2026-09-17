@@ -30,6 +30,7 @@ import 'android_je_embedded_launcher.dart';
 import 'mobile_launch_limits.dart';
 import 'version_catalog.dart';
 import 'version_installer.dart';
+import 'launch_snapshot.dart';
 
 /// 统一安装 + 启动（主页一键启动 / 房间启动共用）。
 class LaunchService {
@@ -89,16 +90,28 @@ class LaunchService {
       await Directory('${gameDir.path}/$sub').create(recursive: true);
     }
     // 旧版曾把模组写入共享 game/mods；若实例为空则一次性迁入，之后不再读写共享 mods
-    await _migrateSharedModsOnce(
-      sharedMods: Directory('${bodyDir.path}/mods'),
-      instanceMods: instanceMods,
-      log: log,
-    );
-    await _migrateSharedSavesOnce(
-      sharedSaves: Directory('${bodyDir.path}/saves'),
-      instanceSaves: Directory('${gameDir.path}/saves'),
-      log: log,
-    );
+    final modsMig = File('${gameDir.path}/.xq_mods_migrated');
+    if (!modsMig.existsSync()) {
+      await _migrateSharedModsOnce(
+        sharedMods: Directory('${bodyDir.path}/mods'),
+        instanceMods: instanceMods,
+        log: log,
+      );
+      try {
+        await modsMig.writeAsString('1');
+      } catch (_) {}
+    }
+    final savesMig = File('${gameDir.path}/.xq_saves_migrated');
+    if (!savesMig.existsSync()) {
+      await _migrateSharedSavesOnce(
+        sharedSaves: Directory('${bodyDir.path}/saves'),
+        instanceSaves: Directory('${gameDir.path}/saves'),
+        log: log,
+      );
+      try {
+        await savesMig.writeAsString('1');
+      } catch (_) {}
+    }
 
     final prepSw = Stopwatch()..start();
     if (includePack &&
@@ -123,42 +136,72 @@ class LaunchService {
     var launchInstance = instance;
     final wantPerfMods = perf?.fps.autoInstallPerfMods == true;
     if (wantPerfMods && launchInstance.loaderType == 'none') {
-      log('已开启自动性能模组：原版实例将自动挂载 Fabric…');
-      try {
-        final loaders = await VersionCatalog(config: config)
-            .listFabricLoaders(launchInstance.gameVersion);
-        if (loaders.isEmpty) {
-          log('未找到适用于 ${launchInstance.gameVersion} 的 Fabric Loader，跳过自动挂载');
-        } else {
-          final loaderVer = loaders.first;
-          launchInstance = launchInstance.copyWith(
-            loaderType: 'fabric',
-            loaderVersion: loaderVer,
-          );
-          await instances.update(launchInstance);
-          log('实例已切换为 Fabric $loaderVer（可装 Sodium 等）');
+      // 优先复用本机已有 Fabric profile，避免每次启动打 meta 网络
+      final reused = VersionInstaller.findLocalFabricLoader(
+        bodyDir,
+        launchInstance.gameVersion,
+      );
+      if (reused != null) {
+        launchInstance = launchInstance.copyWith(
+          loaderType: 'fabric',
+          loaderVersion: reused,
+        );
+        await instances.update(launchInstance);
+        log('复用本机 Fabric $reused（跳过 Loader 列表网络请求）');
+      } else {
+        log('已开启自动性能模组：原版实例将自动挂载 Fabric…');
+        try {
+          final loaders = await VersionCatalog(config: config)
+              .listFabricLoaders(launchInstance.gameVersion);
+          if (loaders.isEmpty) {
+            log('未找到适用于 ${launchInstance.gameVersion} 的 Fabric Loader，跳过自动挂载');
+          } else {
+            final loaderVer = loaders.first;
+            launchInstance = launchInstance.copyWith(
+              loaderType: 'fabric',
+              loaderVersion: loaderVer,
+            );
+            await instances.update(launchInstance);
+            log('实例已切换为 Fabric $loaderVer（可装 Sodium 等）');
+          }
+        } catch (e) {
+          log('自动挂载 Fabric 失败: $e（将继续以原版启动）');
         }
-      } catch (e) {
-        log('自动挂载 Fabric 失败: $e（将继续以原版启动）');
       }
     }
 
     final installSw = Stopwatch()..start();
     final installer = VersionInstaller(onProgress: log, config: config);
     var versionId = launchInstance.gameVersion;
+    var wasWarm = false;
     try {
       if (autoInstall) {
         final force = VersionInstaller.needsForcedReinstall(
           bodyDir,
           launchInstance.gameVersion,
         );
-        final warm = !force &&
+        var warm = !force &&
             VersionInstaller.isWarmReady(
               gameDir: bodyDir,
               gameVersion: launchInstance.gameVersion,
               loaderType: launchInstance.loaderType,
               loaderVersion: launchInstance.loaderVersion,
             );
+        // 缺资产戳但文件已在：补戳后秒启（对齐主流启动器内置运行环境）
+        if (!warm && !force) {
+          await VersionInstaller.healAssetsStampIfPossible(
+            bodyDir,
+            launchInstance.gameVersion,
+            onLog: log,
+          );
+          warm = VersionInstaller.isWarmReady(
+            gameDir: bodyDir,
+            gameVersion: launchInstance.gameVersion,
+            loaderType: launchInstance.loaderType,
+            loaderVersion: launchInstance.loaderVersion,
+          );
+        }
+        wasWarm = warm;
         if (warm) {
           log('本地已就绪，跳过安装检查（快速启动）');
           if (launchInstance.loaderType == 'fabric') {
@@ -207,6 +250,116 @@ class LaunchService {
     }
     installSw.stop();
 
+    // —— 秒启快照：暖启动且无额外装包/皮肤时，跳过 Java/解析/模组，直接 Process.start ——
+    if (wasWarm &&
+        !Platform.isAndroid &&
+        !Platform.isIOS &&
+        !includePack &&
+        !includeSkin) {
+      final snap = await LaunchSnapshot.tryLoad(
+        bodyDir: bodyDir,
+        versionId: versionId,
+        instanceId: launchInstance.id,
+      );
+      if (snap != null) {
+        log('秒启快照命中 · 跳过 Java/库解析/模组检查');
+        final expressSw = Stopwatch()..start();
+        final profile = await _resolveProfile();
+        String? serverHost;
+        int? serverPort;
+        if (includeServer) {
+          final parsed = LaunchLoadout.parseServer(loadout?.serverAddress);
+          if (parsed != null) {
+            serverHost = parsed.host;
+            serverPort = parsed.port;
+            log('将直连服务器 $serverHost:$serverPort');
+          }
+        }
+        final worldName = (singleplayerWorld?.trim().isNotEmpty == true)
+            ? singleplayerWorld!.trim()
+            : (includeWorld &&
+                    loadout?.worldName != null &&
+                    loadout!.worldName!.trim().isNotEmpty)
+                ? loadout.worldName!.trim()
+                : null;
+
+        log('正在拉起游戏进程（秒启）…');
+        final spawnSw = Stopwatch()..start();
+        final process = await launcher.launch(
+          javaPath: snap.javaPath,
+          gameDir: gameDir,
+          version: snap.version,
+          profile: profile,
+          serverHost: serverHost,
+          serverPort: serverPort,
+          singleplayerWorld:
+              (serverHost == null || serverHost.isEmpty) ? worldName : null,
+          javaMajor: snap.javaMajor,
+          instanceJvmArgs: launchInstance.jvmArgs,
+          assetsDir: Directory('${bodyDir.path}/assets'),
+          onLog: log,
+        );
+        spawnSw.stop();
+        expressSw.stop();
+        // ignore: unawaited_futures
+        instances.touchPlayed(launchInstance.id);
+        // 帧率 options 延后写，不挡出窗
+        final fpsDeferred = perf?.fps;
+        if (fpsDeferred != null && fpsDeferred.applyOnLaunch) {
+          // ignore: unawaited_futures
+          JavaOptionsWriter.merge(gameDir, fpsDeferred.toOptionsTxtEntries());
+        }
+        log(
+          '启动耗时 总计${stageMs(totalSw)}'
+          ' · 秒启${stageMs(expressSw)}'
+          ' · 准备${stageMs(prepSw)}'
+          ' · 安装${stageMs(installSw)}'
+          ' · 拉起${stageMs(spawnSw)}',
+        );
+        log('游戏进程已启动 (pid=${process.pid})，窗口出现前可能还需加载资源/模组');
+        if (perf?.trimLauncherOnLaunch == true) {
+          // ignore: unawaited_futures
+          SoftMemoryTrim.trimLauncher(onLog: log);
+        }
+        // ignore: unawaited_futures
+        () async {
+          final early = await Future.any<int?>([
+            process.exitCode.then((c) => c),
+            Future<int?>.delayed(const Duration(seconds: 3), () => null),
+          ]);
+          if (early == null) return;
+          log('游戏进程在启动后立即退出 code=$early');
+          try {
+            final diagnosis = await CrashDiagnoser.analyze(gameDir);
+            for (final f in diagnosis.findings) {
+              log('诊断: ${f.title} — ${f.action ?? f.detail}');
+            }
+          } catch (_) {}
+        }();
+        session?.attach(
+          process: process,
+          instanceName: launchInstance.name,
+          gameDir: gameDir,
+          onLog: log,
+          serverName: null,
+          serverAddress: serverHost == null || serverHost.isEmpty
+              ? null
+              : (serverPort == null ? serverHost : '$serverHost:$serverPort'),
+        );
+        // ignore: unawaited_futures
+        recent?.recordLaunch(
+          instanceId: launchInstance.id,
+          instanceName: launchInstance.name,
+          gameVersion: launchInstance.gameVersion,
+          serverAddress: serverHost == null || serverHost.isEmpty
+              ? null
+              : (serverPort == null ? serverHost : '$serverHost:$serverPort'),
+        );
+        return process;
+      }
+      log('秒启快照未命中，走完整准备（下次启动将秒启）');
+    }
+
     // Android：内嵌 OpenJDK + 虚拟按键（全版本）；失败再回退 FCL/Zalith/Pojav
     if (Platform.isAndroid) {
       log(MobileLaunchLimits.javaSkipDesktopJdk);
@@ -243,10 +396,16 @@ class LaunchService {
     final javaSw = Stopwatch()..start();
     log('准备隔离 Java 环境…');
     final adapter = JavaEnvAdapter(config, javaRuntime);
-    final metaJava = await VersionInstaller.peekDeclaredJavaMajor(
-      bodyDir,
+    // Java 与版本链并行：暖启动时两边都很快
+    final metaJavaFuture =
+        VersionInstaller.peekDeclaredJavaMajor(bodyDir, versionId);
+    final profileFuture = _resolveProfile();
+    final resolvedFuture = installer.resolveVersionChain(
       versionId,
+      bodyDir,
+      trustClasspath: wasWarm,
     );
+    final metaJava = await metaJavaFuture;
     final resolvedJava = await adapter.ensureIsolatedForGame(
       launchInstance.gameVersion,
       onLog: log,
@@ -267,19 +426,17 @@ class LaunchService {
     javaSw.stop();
 
     final resolveSw = Stopwatch()..start();
-    log('解析启动配置…');
-    final profileFuture = _resolveProfile();
-    final resolvedFuture = installer.resolveVersionChain(versionId, bodyDir);
+    log(wasWarm ? '解析启动配置（信任本地库）…' : '解析启动配置…');
     final profile = await profileFuture;
     final resolved = await resolvedFuture;
     log('版本链就绪 · 库 ${resolved.classpath.length} 项');
     resolveSw.stop();
 
-    // 硬件探测有进程内缓存；仅缺失时刷新（不再每次启动都跑 PowerShell）
-    if (perf != null && perf!.autoMemory && perf!.hardware == null) {
+    // 硬件探测有进程内缓存；仅缺失时刷新（暖启动跳过，避免 PowerShell 挡出窗）
+    if (!wasWarm && perf != null && perf!.autoMemory && perf!.hardware == null) {
       await perf!.refreshHardware();
     }
-    if (perf != null && perf!.autoGc && javaMajor != null) {
+    if (!wasWarm && perf != null && perf!.autoGc && javaMajor != null) {
       final hw = perf!.hardware;
       if (hw != null) {
         final auto = GcPresetX.autoSelect(hw, javaMajor);
@@ -291,16 +448,16 @@ class LaunchService {
     }
 
     final modsDir = Directory('${gameDir.path}/mods');
-    final modJars = <File>[];
-    if (await modsDir.exists()) {
+    var modCount = 0;
+    if (!wasWarm && await modsDir.exists()) {
       await for (final e in modsDir.list()) {
         if (e is File && e.path.toLowerCase().endsWith('.jar')) {
-          modJars.add(e);
+          modCount++;
         }
       }
     }
-    final modCount = modJars.length;
-    if (perf != null &&
+    if (!wasWarm &&
+        perf != null &&
         adapter.shouldExpandMetaspace(
           largeModpack: perf!.largeModpack,
           modCount: modCount,
@@ -315,111 +472,125 @@ class LaunchService {
     final gv = launchInstance.gameVersion;
     final canCore = PerfModsInstaller.supportsCoreHud(gv);
     final loaderEarly = launchInstance.loaderType.toLowerCase();
-    // Fabric/Quilt：启动前始终清掉文件名标明不适配的自动模组（防 1.20 jar 留在 26.x）
-    if (loaderEarly == 'fabric' || loaderEarly == 'quilt') {
-      final scrubbed = await PerfModsInstaller(onLog: log)
-          .quarantineIncompatibleAutoMods(instanceMods, gv);
-      if (scrubbed > 0) {
-        log('已隔离 $scrubbed 个不适配 $gv 的自动模组');
+    final perfModsInstaller = PerfModsInstaller(onLog: log);
+    // 暖启动：跳过性能模组全量同步与冲突扫盘，尽快 Process.start 出窗口
+    if (wasWarm) {
+      log('快速启动：跳过性能模组同步与冲突扫描（进程拉起后再说）');
+      if (canCore && (loaderEarly == 'fabric' || loaderEarly == 'quilt')) {
+        // 仅轻量确认核心 jar 在位（不重扫打包源）
+        final coreName = PerfModsInstaller.coreJarNameFor(gv);
+        final coreFile = File(
+          '${instanceMods.path}${Platform.pathSeparator}$coreName',
+        );
+        if (!coreFile.existsSync()) {
+          await perfModsInstaller.ensureCoreJar(
+            instanceMods,
+            force: false,
+            gameVersion: gv,
+          );
+        }
       }
-    }
-    // 性能模组只写入当前实例 mods，绝不碰共享本体
-    if (fps != null &&
-        fps.autoInstallPerfMods &&
-        launchInstance.loaderType != 'none') {
-      log(
-        canCore
-            ? '帧率优化：按 $gv 安装星穹优化（核心+引擎）…'
-            : '帧率优化：按 $gv 安装加速引擎（核心需 MC≥1.20）…',
-      );
-      final result = await PerfModsInstaller(onLog: log).install(
-        gameVersion: gv,
-        loaderType: launchInstance.loaderType,
-        modsDir: instanceMods,
-      );
-      if (canCore) {
-        final coreInst = await PerfModsInstaller(onLog: log).ensureCoreJar(
+    } else {
+      // Fabric/Quilt：启动前始终清掉文件名标明不适配的自动模组（防 1.20 jar 留在 26.x）
+      if (loaderEarly == 'fabric' || loaderEarly == 'quilt') {
+        final scrubbed = await perfModsInstaller
+            .quarantineIncompatibleAutoMods(instanceMods, gv);
+        if (scrubbed > 0) {
+          log('已隔离 $scrubbed 个不适配 $gv 的自动模组');
+        }
+      }
+      // 性能模组只写入当前实例 mods，绝不碰共享本体
+      if (fps != null &&
+          fps.autoInstallPerfMods &&
+          launchInstance.loaderType != 'none') {
+        log(
+          canCore
+              ? '帧率优化：按 $gv 安装星穹优化（核心+引擎）…'
+              : '帧率优化：按 $gv 安装加速引擎（核心需 MC≥1.20）…',
+        );
+        final result = await perfModsInstaller.install(
+          gameVersion: gv,
+          loaderType: launchInstance.loaderType,
+          modsDir: instanceMods,
+        );
+        log(
+          canCore
+              ? '星穹优化：写入 ${result.ok} · 已有 ${result.skip} · 失败 ${result.fail}'
+              : '加速引擎：写入 ${result.ok} · 已有 ${result.skip} · 不可用 ${result.fail}'
+                  '（小地图需 Minecraft ≥1.20）',
+        );
+      } else if (fps != null &&
+          fps.autoInstallPerfMods &&
+          launchInstance.loaderType == 'none') {
+        log('自动星穹优化已开，但实例仍是原版（无 Fabric），已跳过——游戏内不会有模组功能');
+      } else if (!canCore) {
+        final moved = await perfModsInstaller.quarantineMismatchedAutoMods(
           instanceMods,
-          force: true,
+          gv,
+        );
+        if (moved > 0) {
+          log('已隔离 $moved 个不适配 $gv 的自动模组');
+        }
+      }
+
+      // 未开自动性能包时，Fabric≥1.20 仍同步核心 jar（尺寸未变则跳过拷贝）
+      final loader = launchInstance.loaderType.toLowerCase();
+      if (canCore &&
+          (loader == 'fabric' || loader == 'quilt') &&
+          (fps == null || !fps.autoInstallPerfMods)) {
+        final coreInst = await perfModsInstaller.ensureCoreJar(
+          instanceMods,
+          force: false,
           gameVersion: gv,
         );
-        log(
-          '星穹优化：写入 ${result.ok} · 已有 ${result.skip} · 失败 ${result.fail}'
-          ' · 核心=${coreInst ? "OK" : "缺失"}',
-        );
-      } else {
-        log(
-          '加速引擎：写入 ${result.ok} · 已有 ${result.skip} · 不可用 ${result.fail}'
-          '（小地图需 Minecraft ≥1.20）',
-        );
+        if (coreInst) {
+          log('星穹优化核心已同步（小窗桥接 xingqiong_hud.json）');
+        }
       }
-    } else if (fps != null &&
-        fps.autoInstallPerfMods &&
-        launchInstance.loaderType == 'none') {
-      log('自动星穹优化已开，但实例仍是原版（无 Fabric），已跳过——游戏内不会有模组功能');
-    } else if (!canCore) {
-      final moved = await PerfModsInstaller(onLog: log)
-          .quarantineMismatchedAutoMods(instanceMods, gv);
-      if (moved > 0) {
-        log('已隔离 $moved 个不适配 $gv 的自动模组');
+
+      // 弱冲突自动修复后继续启动；强冲突仍可按设置阻止
+      final wantAutoFix = perf?.autoFixSoftConflict ?? true;
+      if (wantAutoFix) {
+        final autoFixed = ModConflictScanner.autoResolve(
+          [instanceMods],
+          loaderType: launchInstance.loaderType,
+        );
+        if (autoFixed.isNotEmpty) {
+          log('弱冲突已自动修复并继续启动，已删除：${autoFixed.join(', ')}');
+        }
+      }
+      final conflicts = ModConflictScanner.scan(instanceMods);
+      for (final c in conflicts) {
+        final tag = switch (c.severity) {
+          ConflictSeverity.block => '冲突',
+          ConflictSeverity.soft => '弱冲突',
+          ConflictSeverity.warn => '警告',
+        };
+        log('$tag: ${c.title} — ${c.suggestion}');
+      }
+      final softLeft =
+          conflicts.where((c) => c.severity == ConflictSeverity.soft);
+      if (softLeft.isNotEmpty && wantAutoFix) {
+        final again = ModConflictScanner.autoResolve(
+          [instanceMods],
+          loaderType: launchInstance.loaderType,
+        );
+        if (again.isNotEmpty) {
+          log('弱冲突二次清理：${again.join(', ')}');
+        }
+      }
+      final hard = ModConflictScanner.scan(instanceMods)
+          .where((c) => c.severity == ConflictSeverity.block)
+          .toList();
+      if (perf?.blockOnModConflict == true && hard.isNotEmpty) {
+        final blocked =
+            hard.map((c) => '${c.title} — ${c.suggestion}').join('；');
+        throw StateError(
+          '检测到无法自动修复的模组冲突，已中止启动。冲突: $blocked',
+        );
       }
     }
     perfModsSw.stop();
-
-    // 未开自动性能包时，Fabric≥1.20 仍强制同步核心 jar（保证小窗桥接版本一致）
-    final loader = launchInstance.loaderType.toLowerCase();
-    if (canCore && (loader == 'fabric' || loader == 'quilt')) {
-      final coreInst = await PerfModsInstaller(onLog: log).ensureCoreJar(
-        instanceMods,
-        force: true,
-        gameVersion: gv,
-      );
-      if (coreInst) {
-        log('星穹优化核心已同步（小窗桥接 xingqiong_hud.json）');
-      }
-    }
-
-    // 弱冲突自动修复后继续启动；强冲突仍可按设置阻止
-    final wantAutoFix = perf?.autoFixSoftConflict ?? true;
-    if (wantAutoFix) {
-      final autoFixed = ModConflictScanner.autoResolve(
-        [instanceMods],
-        loaderType: launchInstance.loaderType,
-      );
-      if (autoFixed.isNotEmpty) {
-        log('弱冲突已自动修复并继续启动，已删除：${autoFixed.join(', ')}');
-      }
-    }
-    final conflicts = ModConflictScanner.scan(instanceMods);
-    for (final c in conflicts) {
-      final tag = switch (c.severity) {
-        ConflictSeverity.block => '冲突',
-        ConflictSeverity.soft => '弱冲突',
-        ConflictSeverity.warn => '警告',
-      };
-      log('$tag: ${c.title} — ${c.suggestion}');
-    }
-    final softLeft = conflicts.where((c) => c.severity == ConflictSeverity.soft);
-    if (softLeft.isNotEmpty && wantAutoFix) {
-      // 仍有 soft 说明规则未能删干净，再修一次后继续（不中止）
-      final again = ModConflictScanner.autoResolve(
-        [instanceMods],
-        loaderType: launchInstance.loaderType,
-      );
-      if (again.isNotEmpty) {
-        log('弱冲突二次清理：${again.join(', ')}');
-      }
-    }
-    final hard = ModConflictScanner.scan(instanceMods)
-        .where((c) => c.severity == ConflictSeverity.block)
-        .toList();
-    if (perf?.blockOnModConflict == true && hard.isNotEmpty) {
-      final blocked =
-          hard.map((c) => '${c.title} — ${c.suggestion}').join('；');
-      throw StateError(
-        '检测到无法自动修复的模组冲突，已中止启动。冲突: $blocked',
-      );
-    }
 
     var fpsSettings = fps;
     if (fpsSettings != null &&
@@ -434,14 +605,20 @@ class LaunchService {
     }
 
     if (fpsSettings != null && fpsSettings.applyOnLaunch) {
-      log(
-        '写入帧率 options.txt（${fpsSettings.preset.label}'
-        '${fpsSettings.vsync ? " · 垂直同步开 · 上限 ${fpsSettings.maxFps}" : " · 同步关"}）…',
-      );
-      await JavaOptionsWriter.merge(
-        gameDir,
-        fpsSettings.toOptionsTxtEntries(),
-      );
+      if (wasWarm) {
+        // 暖启动：options 延后写，优先出窗
+        // ignore: unawaited_futures
+        JavaOptionsWriter.merge(gameDir, fpsSettings.toOptionsTxtEntries());
+      } else {
+        log(
+          '写入帧率 options.txt（${fpsSettings.preset.label}'
+          '${fpsSettings.vsync ? " · 垂直同步开 · 上限 ${fpsSettings.maxFps}" : " · 同步关"}）…',
+        );
+        await JavaOptionsWriter.merge(
+          gameDir,
+          fpsSettings.toOptionsTxtEntries(),
+        );
+      }
     }
 
     String? serverHost;
@@ -500,6 +677,15 @@ class LaunchService {
     );
     spawnSw.stop();
     await instances.touchPlayed(launchInstance.id);
+    // 写入秒启快照，供下次跳过 Java/解析
+    // ignore: unawaited_futures
+    LaunchSnapshot(
+      versionId: versionId,
+      javaPath: javaPath,
+      javaMajor: javaMajor,
+      version: resolved,
+      instanceId: launchInstance.id,
+    ).save(bodyDir);
     log(
       '启动耗时 总计${stageMs(totalSw)}'
       ' · 准备${stageMs(prepSw)}'

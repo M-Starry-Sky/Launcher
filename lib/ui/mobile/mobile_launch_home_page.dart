@@ -145,7 +145,8 @@ class _MobileLaunchHomePageState extends State<MobileLaunchHomePage> {
         return;
       }
       if (cfg.launchMinimizeOnStart) {
-        await context.read<LauncherSleepController>().enter(onLog: _log);
+        // ignore: unawaited_futures
+        context.read<LauncherSleepController>().enter(onLog: _log);
       }
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -178,7 +179,8 @@ class _MobileLaunchHomePageState extends State<MobileLaunchHomePage> {
       await _refreshBedrock();
       final cfg = context.read<AppConfig>();
       if (cfg.launchMinimizeOnStart) {
-        await context.read<LauncherSleepController>().enter(onLog: _log);
+        // ignore: unawaited_futures
+        context.read<LauncherSleepController>().enter(onLog: _log);
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

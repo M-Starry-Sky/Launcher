@@ -3,7 +3,7 @@
 ; 品牌：Setup 图标 + 向导左右侧 Logo 图
 
 #define MyAppName "星穹次元启动器"
-#define MyAppVersion "0.2.5"
+#define MyAppVersion "0.2.6"
 #define MyAppPublisher "星穹次元 / M-Starry-Sky"
 #define MyAppURL "https://github.com/M-Starry-Sky/Launcher"
 #define MyAppExeName "xingqiong_launcher.exe"
@@ -81,6 +81,10 @@ Source: "..\build\windows\x64\runner\Release\*"; DestDir: "{app}"; Flags: ignore
 ; 附带品牌 Logo，便于用户识别
 Source: "..\assets\images\logo.png"; DestDir: "{app}\branding"; Flags: ignoreversion
 Source: "branding\setup.ico"; DestDir: "{app}\branding"; Flags: ignoreversion
+
+[Dirs]
+; 内置 Java 运行时目录（首次启动自动下载 Temurin，也可预置 jdk-17/jdk-21）
+Name: "{app}\runtimes\java"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\branding\setup.ico"; Tasks: startmenuicon

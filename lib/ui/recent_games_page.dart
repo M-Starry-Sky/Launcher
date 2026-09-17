@@ -177,7 +177,8 @@ class _RecentGamesPageState extends State<RecentGamesPage>
             autoInstall: cfg.launchAutoInstall,
           );
       if (cfg.launchMinimizeOnStart && mounted) {
-        await context.read<LauncherSleepController>().enter();
+        // ignore: unawaited_futures
+        context.read<LauncherSleepController>().enter();
       }
       if (mounted) {
         messenger.showSnackBar(const SnackBar(content: Text('游戏已启动')));

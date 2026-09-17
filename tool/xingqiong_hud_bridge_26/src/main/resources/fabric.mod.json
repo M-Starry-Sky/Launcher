@@ -3,7 +3,7 @@
   "id": "xingqiong-perf",
   "version": "${version}",
   "name": "Xingqiong Perf",
-  "description": "MiniWorld-style minimap/bigmap, info HUD, launcher overlay bridge for Minecraft 26.x",
+  "description": "MiniWorld-style minimap/bigmap, info HUD, combat hearts/damage numbers, launcher overlay bridge for Minecraft 26.x",
   "authors": ["xingqiong"],
   "license": "Apache-2.0",
   "environment": "client",

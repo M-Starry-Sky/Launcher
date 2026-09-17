@@ -17,6 +17,8 @@ public final class HudSettings {
 
     public static volatile float heartRenderDistance = 16f;
     public static volatile boolean heartsEnabled = true;
+    public static volatile boolean hideHeartsWhenFull = false;
+    public static volatile int heartDamageMemoryTicks = 100;
     public static volatile int deathPointSerial = 1;
 
     private HudSettings() {}

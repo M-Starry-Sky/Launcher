@@ -10,7 +10,12 @@ import 'package:path_provider/path_provider.dart';
 import '../download/download_sources.dart';
 import '../download/network_env.dart';
 
-/// 绿色免安装 JDK/JRE：自动探测网络，切换国内镜像 / 官方源。
+/// 绿色免安装 JDK/JRE：优先启动器旁内置目录，自动探测网络切换国内镜像 / 官方源。
+///
+/// 查找顺序：
+/// 1. `{启动器目录}/runtimes/java`（便携/安装包内置）
+/// 2. Windows `C:\xingqiong\runtimes\java`（跨版本共享缓存）
+/// 3. 应用支持目录 `runtimes/java`
 class PortableJavaInstaller {
   final void Function(String line)? onLog;
 
@@ -20,14 +25,71 @@ class PortableJavaInstaller {
   static const _minStallBytes = 64 * 1024;
   static const _downloadTimeout = Duration(minutes: 20);
 
-  Future<Directory> _root() async {
-    if (Platform.isWindows) {
-      final preferred = Directory(r'C:\xingqiong\runtimes\java');
-      try {
-        await preferred.create(recursive: true);
-        return preferred;
-      } catch (_) {}
+  /// 启动器可执行文件旁的内置运行时根目录。
+  static Directory? bundledRoot() {
+    if (Platform.isAndroid || Platform.isIOS) return null;
+    try {
+      final exeDir = p.dirname(Platform.resolvedExecutable);
+      return Directory(p.join(exeDir, 'runtimes', 'java'));
+    } catch (_) {
+      return null;
     }
+  }
+
+  Future<List<Directory>> _candidateRoots({bool forWrite = false}) async {
+    final out = <Directory>[];
+    final seen = <String>{};
+
+    Future<void> add(Directory? d, {bool create = false}) async {
+      if (d == null) return;
+      final key = p.normalize(d.path).toLowerCase();
+      if (!seen.add(key)) return;
+      if (create) {
+        try {
+          await d.create(recursive: true);
+        } catch (_) {
+          return;
+        }
+      }
+      if (d.existsSync() || create) out.add(d);
+    }
+
+    // 1) 启动器内置（便携包 / 安装目录旁）
+    final bundled = bundledRoot();
+    if (bundled != null) {
+      if (forWrite) {
+        await add(bundled, create: true);
+      } else if (bundled.existsSync()) {
+        await add(bundled);
+      } else {
+        // 写入时再创建；查找时若父目录可写则预留
+        try {
+          final parent = bundled.parent;
+          if (parent.existsSync()) await add(bundled, create: true);
+        } catch (_) {}
+      }
+    }
+
+    // 2) Windows 共享缓存
+    if (Platform.isWindows) {
+      await add(Directory(r'C:\xingqiong\runtimes\java'), create: forWrite);
+    }
+
+    // 3) 应用支持目录
+    try {
+      final support = await getApplicationSupportDirectory();
+      await add(
+        Directory(p.join(support.path, 'runtimes', 'java')),
+        create: forWrite,
+      );
+    } catch (_) {}
+
+    return out;
+  }
+
+  Future<Directory> _root() async {
+    final roots = await _candidateRoots(forWrite: true);
+    if (roots.isNotEmpty) return roots.first;
     final support = await getApplicationSupportDirectory();
     final dir = Directory(p.join(support.path, 'runtimes', 'java'));
     await dir.create(recursive: true);
@@ -35,14 +97,17 @@ class PortableJavaInstaller {
   }
 
   Future<String?> findInstalled(int major) async {
-    final root = await _root();
-    final home = Directory(p.join(root.path, 'jdk-$major'));
-    if (!home.existsSync()) return null;
-    final exe = Platform.isWindows
-        ? p.join(home.path, 'bin', 'java.exe')
-        : p.join(home.path, 'bin', 'java');
-    if (File(exe).existsSync()) return exe;
-    return _findJavaExe(home);
+    for (final root in await _candidateRoots(forWrite: false)) {
+      final home = Directory(p.join(root.path, 'jdk-$major'));
+      if (!home.existsSync()) continue;
+      final exe = Platform.isWindows
+          ? p.join(home.path, 'bin', 'java.exe')
+          : p.join(home.path, 'bin', 'java');
+      if (File(exe).existsSync()) return exe;
+      final nested = await _findJavaExe(home);
+      if (nested != null) return nested;
+    }
+    return null;
   }
 
   Future<String> ensure(int major, {bool forceReinstall = false}) async {
@@ -67,7 +132,8 @@ class PortableJavaInstaller {
       await reinstall(major);
     }
     await NetworkEnv.instance.ensureProbed(onLog: onLog);
-    onLog?.call('正在下载 Temurin Java $major（自动择优下载源）…');
+    final root = await _root();
+    onLog?.call('正在下载 Temurin Java $major → ${root.path}…');
     final archivePath = await _download(major).timeout(
       _downloadTimeout,
       onTimeout: () => throw TimeoutException('下载 Java $major 超时'),
@@ -94,22 +160,24 @@ class PortableJavaInstaller {
   }
 
   Future<void> reinstall(int major) async {
-    final root = await _root();
-    final home = Directory(p.join(root.path, 'jdk-$major'));
-    final staging = Directory(p.join(root.path, 'jdk-$major.staging'));
-    for (final d in [home, staging]) {
-      if (d.existsSync()) {
-        try {
-          await d.delete(recursive: true);
-        } catch (_) {}
+    final roots = await _candidateRoots(forWrite: true);
+    for (final root in roots) {
+      final home = Directory(p.join(root.path, 'jdk-$major'));
+      final staging = Directory(p.join(root.path, 'jdk-$major.staging'));
+      for (final d in [home, staging]) {
+        if (d.existsSync()) {
+          try {
+            await d.delete(recursive: true);
+          } catch (_) {}
+        }
       }
-    }
-    for (final ext in ['zip', 'tar.gz']) {
-      final f = File(p.join(root.path, 'jdk-$major-download.$ext'));
-      if (f.existsSync()) {
-        try {
-          await f.delete();
-        } catch (_) {}
+      for (final ext in ['zip', 'tar.gz']) {
+        final f = File(p.join(root.path, 'jdk-$major-download.$ext'));
+        if (f.existsSync()) {
+          try {
+            await f.delete();
+          } catch (_) {}
+        }
       }
     }
   }
@@ -332,6 +400,7 @@ class PortableJavaInstaller {
         'major': major,
         'top': top,
         'at': DateTime.now().toIso8601String(),
+        'root': root.path,
       }),
     );
     return target;

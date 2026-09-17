@@ -1,0 +1,10 @@
+{
+  "key.xingqiong.open_bigmap": "Open Big Map",
+  "key.xingqiong.place_marker": "Place Waypoint",
+  "key.xingqiong.toggle_north": "Lock North",
+  "key.xingqiong.hide_hud": "Toggle HUD",
+  "key.xingqiong.cycle_marker_kind": "Cycle Marker Kind",
+  "key.xingqiong.toggle_cave": "Surface / Cave Map",
+  "key.xingqiong.toggle_minimap": "Toggle Minimap (legacy)",
+  "category.xingqiong.hud": "Xingqiong HUD"
+}

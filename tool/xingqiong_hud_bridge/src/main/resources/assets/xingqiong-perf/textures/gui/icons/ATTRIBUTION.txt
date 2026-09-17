@@ -1,0 +1,8 @@
+﻿Phosphor Icons
+Copyright (c) Phosphor Icons
+License: MIT — https://github.com/phosphor-icons/core
+
+SVG sources under svg/ are from @phosphor-icons/core (fill weight).
+PNG textures are white silhouette renders for Minecraft tinting,
+derived from those icons for: home(house), mine(hammer), boss(crown),
+danger(warning), quest(scroll), bed, skull, flag.

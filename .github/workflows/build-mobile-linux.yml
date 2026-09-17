@@ -1,0 +1,61 @@
+name: Build Linux & Android
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+            libsecret-1-dev libjsoncpp-dev libstdc++-12-dev
+      - name: Build Linux
+        working-directory: .
+        run: |
+          flutter config --enable-linux-desktop
+          flutter pub get
+          flutter build linux --release
+      - name: Pack
+        run: |
+          ver=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}' | cut -d'+' -f1)
+          out="XingqiongLauncher-${ver}-linux-x64.tar.gz"
+          tar -C build/linux/x64/release/bundle -czf "$out" .
+          echo "OUT=$out" >> $GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: XingqiongLauncher-*-linux-x64.tar.gz
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Build APK
+        run: |
+          flutter pub get
+          flutter build apk --release
+      - name: Rename
+        run: |
+          ver=$(grep '^version:' pubspec.yaml | head -1 | awk '{print $2}' | cut -d'+' -f1)
+          cp build/app/outputs/flutter-apk/app-release.apk "XingqiongLauncher-${ver}-android.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: XingqiongLauncher-*-android.apk

@@ -1,0 +1,74 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# Secrets
+.env
+.env.*
+!.env.example
+**/.dev.vars
+**/credentials*.json
+**/local.properties
+
+# IntelliJ
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Flutter / Dart
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/
+macos/Flutter/ephemeral/
+
+# Symbolication / obfuscation maps
+app.*.symbols
+app.*.map.json
+
+# Android Studio
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+.widget_preview/
+
+# HUD bridge Gradle caches (path-too-long on Windows)
+tool/xingqiong_hud_bridge/.gradle/
+tool/xingqiong_hud_bridge/build/
+tool/xingqiong_hud_bridge_26/.gradle/
+tool/xingqiong_hud_bridge_26/build/
+tool/xingqiong_hud_bridge_26/_deps/
+tool/xingqiong_hud_bridge*/_build_log*.txt
+tool/xingqiong_hud_bridge_26/_ref_*.java
+**/.gradle/
+**/__pycache__/
+**/.venv/
+**/venv/
+**/_tmp_*
+**/*.tmp
+
+# Release tooling / outputs (upload via GitHub Releases)
+tool/release_tools/
+/dist/
+*.Setup.exe
+_apk_build.log
+_run_app.log

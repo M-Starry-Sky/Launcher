@@ -1,0 +1,43 @@
+name: xingqiong_launcher
+description: 星穹次元启动器 —— 第三方非官方 Minecraft 辅助启动与联机隧道工具
+publish_to: "none"
+version: 0.2.4
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  crypto: ^3.0.5
+  provider: ^6.1.2
+  shared_preferences: ^2.3.2
+  flutter_secure_storage: ^9.2.2
+  path_provider: ^2.1.4
+  permission_handler: ^11.3.1
+  path: ^1.9.0
+  archive: ^3.6.1
+  desktop_drop:
+    path: third_party/desktop_drop
+  window_manager: ^0.4.3
+  screen_retriever: ^0.2.2
+  flutter_acrylic: ^1.1.4
+  flutter_localizations:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/default_background.png
+    - assets/images/splash_background.png
+    - assets/images/logo.png
+    - assets/images/avatars/steve.png
+    - assets/images/avatars/alex.png
+    - assets/mods/xingqiong-perf.jar
+    - assets/mods/xingqiong-perf-26.jar

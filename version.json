@@ -1,0 +1,6 @@
+{
+  "version": "0.2.2",
+  "notes": "实例模组/存档严格隔离；弱冲突（ViaFabric/Plus 等）自动修复并继续启动；Linux CI 补齐 libsecret。",
+  "download_url": "https://github.com/M-Starry-Sky/Launcher/releases/download/v0.2.2/XingqiongLauncher-0.2.2-Windows-x64-Setup.exe",
+  "release_url": "https://github.com/M-Starry-Sky/Launcher/releases/tag/v0.2.2"
+}

@@ -1,0 +1,10 @@
+{
+  "key.xingqiong.open_bigmap": "打开大地图",
+  "key.xingqiong.place_marker": "放置标记",
+  "key.xingqiong.toggle_north": "小地图锁北",
+  "key.xingqiong.hide_hud": "隐藏/显示 HUD",
+  "key.xingqiong.cycle_marker_kind": "切换标记类型",
+  "key.xingqiong.toggle_cave": "地表/洞穴地图",
+  "key.xingqiong.toggle_minimap": "开关小地图（旧）",
+  "category.xingqiong.hud": "星穹 HUD"
+}

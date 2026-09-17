@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "xingqiong-perf",
+  "version": "${version}",
+  "name": "Xingqiong Perf",
+  "description": "MiniWorld-style minimap/bigmap, info HUD, launcher overlay bridge (xingqiong_hud.json); MC 1.20 through latest",
+  "authors": ["xingqiong"],
+  "contact": {},
+  "license": "Apache-2.0",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.xingqiong.hud.XingqiongHudBridge"]
+  },
+  "depends": {
+    "fabricloader": ">=0.14.0",
+    "fabric-api": "*",
+    "minecraft": ">=1.20"
+  },
+  "custom": {
+    "xingqiong:api": "com.xingqiong.hud.api.XingqiongPerfApi",
+    "xingqiong:mc_support": "1.20 .. latest (calendar versions included)"
+  }
+}

@@ -51,7 +51,9 @@ class BedrockInstall {
       'https://www.microsoft.com/store/productId/$storeProductId';
 
   /// 优先正式版，其次 Preview；再模糊扫描 Packages / AppxPackage。
+  /// Android：检测已安装的 `com.mojang.minecraftpe`。
   static Future<BedrockInstallInfo?> detect() async {
+    if (Platform.isAndroid) return _detectAndroid();
     if (!Platform.isWindows) return null;
     final localAppData = Platform.environment['LOCALAPPDATA'];
     if (localAppData == null || localAppData.isEmpty) return null;
@@ -230,6 +232,39 @@ class BedrockInstall {
       return web.exitCode == 0;
     } catch (_) {
       return false;
+    }
+  }
+
+  static const androidPackage = 'com.mojang.minecraftpe';
+
+  static Future<BedrockInstallInfo?> _detectAndroid() async {
+    try {
+      final r = await Process.run('pm', ['path', androidPackage]);
+      final out = '${r.stdout}${r.stderr}';
+      if (r.exitCode != 0 || !out.contains('package:')) return null;
+
+      // 常见 com.mojang 数据目录（按存在优先）
+      final candidates = <String>[
+        '/storage/emulated/0/games/com.mojang',
+        '/sdcard/games/com.mojang',
+        '/storage/emulated/0/Android/data/$androidPackage/files/games/com.mojang',
+      ];
+      var comRoot = candidates.first;
+      for (final c in candidates) {
+        if (Directory(c).existsSync()) {
+          comRoot = c;
+          break;
+        }
+      }
+      return BedrockInstallInfo(
+        packageFamilyName: androidPackage,
+        packageRoot: '',
+        comMojangRoot: comRoot,
+        preview: false,
+        displayVersion: null,
+      );
+    } catch (_) {
+      return null;
     }
   }
 }

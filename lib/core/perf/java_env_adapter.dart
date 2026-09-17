@@ -178,7 +178,10 @@ class JavaEnvAdapter {
     int? javaMajorFromMeta,
   }) async {
     if (MobileLaunchLimits.isMobile) {
-      throw StateError(MobileLaunchLimits.javaUnsupported);
+      throw StateError(
+        '${MobileLaunchLimits.javaSkipDesktopJdk}。'
+        '请用「启动」唤起 FCL/Zalith/Pojav（Android OpenJDK 方案）。',
+      );
     }
     final need = JavaVersionPolicy.isolatedMajor(
       gameVersion,

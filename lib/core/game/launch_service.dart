@@ -26,6 +26,7 @@ import 'game_instance.dart';
 import 'game_launcher.dart';
 import 'java_runtime.dart';
 import 'launch_loadout.dart';
+import 'android_je_embedded_launcher.dart';
 import 'mobile_launch_limits.dart';
 import 'version_catalog.dart';
 import 'version_installer.dart';
@@ -56,7 +57,7 @@ class LaunchService {
     this.recent,
   });
 
-  Future<Process> installAndLaunch(
+  Future<Process?> installAndLaunch(
     GameInstance instance, {
     void Function(String line)? onLog,
     bool autoInstall = true,
@@ -65,9 +66,6 @@ class LaunchService {
     String? singleplayerWorld,
   }) async {
     void log(String m) => onLog?.call(m);
-    if (MobileLaunchLimits.isMobile) {
-      throw StateError(MobileLaunchLimits.javaUnsupported);
-    }
     final totalSw = Stopwatch()..start();
     String stageMs(Stopwatch s) => '${s.elapsedMilliseconds}ms';
 
@@ -208,6 +206,38 @@ class LaunchService {
       installer.close();
     }
     installSw.stop();
+
+    // Android：内嵌 OpenJDK + 虚拟按键（全版本）；失败再回退 FCL/Zalith/Pojav
+    if (Platform.isAndroid) {
+      log(MobileLaunchLimits.javaSkipDesktopJdk);
+      await _writeMobileJvmImportHint(
+        bodyDir: bodyDir,
+        gameDir: gameDir,
+        versionId: versionId,
+        log: log,
+      );
+      final metaJava = await VersionInstaller.peekDeclaredJavaMajor(
+        bodyDir,
+        versionId,
+      );
+      await AndroidJeEmbeddedLauncher.launch(
+        gameDir: bodyDir.path,
+        versionId: versionId,
+        gameVersion: launchInstance.gameVersion,
+        auth: auth,
+        javaMajorFromMeta: metaJava,
+        onLog: log,
+        preferExternalFallback: true,
+      );
+      totalSw.stop();
+      log('手机内嵌 Java 启动完成 · 总耗时 ${stageMs(totalSw)}');
+      return null;
+    }
+    if (Platform.isIOS) {
+      throw StateError(
+        'iOS 暂未接入 Java 版运行时。Android 请使用内嵌虚拟键启动，或安装 FCL/Zalith/Pojav 作为回退。',
+      );
+    }
 
     // 本体就绪后再装 Java，避免 Java 源失败导致「游戏也下不下来」
     final javaSw = Stopwatch()..start();
@@ -568,6 +598,12 @@ class LaunchService {
 
     final install = await BedrockInstall.detect();
     if (install == null) {
+      if (Platform.isAndroid) {
+        throw StateError(
+          '未检测到已安装的基岩版（com.mojang.minecraftpe）。'
+          '请先从应用商店安装 Minecraft，本启动器不托管版本体下载。',
+        );
+      }
       throw StateError(
         '未检测到已安装的基岩版。请先从微软商店安装 Minecraft，本启动器不托管版本体下载。',
       );
@@ -837,6 +873,36 @@ class LaunchService {
     }
     if (n > 0) {
       log('已将共享 mods 中 $n 个 jar 迁入本实例（此后仅用实例目录）');
+    }
+  }
+
+  /// 写入手机端说明（内嵌路径 + 外部回退导入）。
+  Future<void> _writeMobileJvmImportHint({
+    required Directory bodyDir,
+    required Directory gameDir,
+    required String versionId,
+    required void Function(String) log,
+  }) async {
+    try {
+      final hint = File('${bodyDir.path}${Platform.pathSeparator}星穹次元-手机Java导入说明.txt');
+      await hint.writeAsString(
+        '星穹次元启动器 · 手机内嵌 Java 版\n'
+        '\n'
+        '主路径：本应用内嵌 Android OpenJDK + 虚拟按键（横屏触控）。\n'
+        '适配：按版本自动选择 Java 8/11/17/21，已下载的版本均可走同一套启动。\n'
+        '\n'
+        '本体目录：\n'
+        '${bodyDir.path}\n'
+        '实例目录（模组/存档）：\n'
+        '${gameDir.path}\n'
+        '版本：$versionId\n'
+        '\n'
+        '若内嵌 natives 未打包完整，可回退安装 FCL / Zalith / Pojav，\n'
+        '在对方启动器中「添加游戏目录」指向上述本体路径。\n',
+      );
+      log('已写入导入说明: ${hint.path}');
+    } catch (e) {
+      log('写入导入说明失败: $e');
     }
   }
 

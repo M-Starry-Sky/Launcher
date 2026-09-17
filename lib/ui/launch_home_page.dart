@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -13,7 +14,6 @@ import '../core/game/mobile_launch_limits.dart';
 import '../core/perf/game_session.dart';
 import '../core/perf/launcher_sleep.dart';
 import '../core/perf/perf_config.dart';
-import 'dart:io';
 import 'app_theme.dart';
 import 'glass/liquid_glass.dart';
 import 'instances_page.dart';
@@ -102,6 +102,16 @@ class _LaunchHomePageState extends State<LaunchHomePage> {
       await _playBedrock();
       return;
     }
+    if (Platform.isIOS) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'iOS 暂未接入 Java 版。Android 请用内嵌虚拟键启动。',
+          ),
+        ),
+      );
+      return;
+    }
     final store = context.read<InstanceStore>();
     final instance = store.selected;
     if (instance == null) {
@@ -142,6 +152,18 @@ class _LaunchHomePageState extends State<LaunchHomePage> {
             loadout: loadout,
             autoInstall: cfg.launchAutoInstall,
           );
+      if (Platform.isAndroid) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                '已打开内嵌 Java 版（含虚拟按键）；首次需下载手机 OpenJDK',
+              ),
+            ),
+          );
+        }
+        return;
+      }
       // 游戏进程已起来：主动最小化并休眠降载
       if (cfg.launchMinimizeOnStart) {
         await context.read<LauncherSleepController>().enter(onLog: _log);
@@ -545,7 +567,21 @@ class _LaunchHomePageState extends State<LaunchHomePage> {
                 label: 'Java 版',
                 icon: Icons.desktop_windows_outlined,
                 selected: isJava,
-                onTap: _busy ? null : () => setState(() => _edition = 'java'),
+                onTap: _busy
+                    ? null
+                    : () {
+                        if (Platform.isIOS) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'iOS 暂未接入 Java 版运行时',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        setState(() => _edition = 'java');
+                      },
               ),
             ),
             const SizedBox(width: 8),
@@ -705,10 +741,12 @@ class _LaunchHomePageState extends State<LaunchHomePage> {
     final subtitle = _bedrockChecking
         ? '正在检测本机安装…'
         : info == null
-            ? '未检测到微软商店基岩版（不提供版本体下载）'
+            ? (MobileLaunchLimits.isMobile
+                ? '未检测到已安装的 Minecraft 基岩版（请先安装官方客户端）'
+                : '未检测到微软商店基岩版（不提供版本体下载）')
             : '${info.label}'
                 '${info.displayVersion != null ? ' · ${info.displayVersion}' : ''}'
-                '\n将写入 options.txt 并协议启动';
+                '\n${MobileLaunchLimits.isMobile ? '将唤起已安装的基岩版客户端' : '将写入 options.txt 并协议启动'}';
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
       decoration: BoxDecoration(

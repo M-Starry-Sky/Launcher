@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../core/config/app_config.dart';
 import '../core/game/game_instance.dart';
 import '../core/game/java_runtime.dart';
+import '../core/game/mobile_launch_limits.dart';
 import '../core/game/version_catalog.dart';
 import '../core/game/version_installer.dart';
 import '../core/perf/java_env_adapter.dart';
@@ -366,18 +367,22 @@ class _DownloadPageState extends State<DownloadPage> {
       pushLog('完成：${root.path}${Platform.pathSeparator}versions${Platform.pathSeparator}$versionId');
 
       try {
-        pushLog('准备隔离 Java（失败不影响已下好的本体）…');
-        if (!mounted) return true;
-        final metaJava = await VersionInstaller.peekDeclaredJavaMajor(
-          root,
-          versionId,
-        );
-        await JavaEnvAdapter(cfg, context.read<JavaRuntime>())
-            .ensureIsolatedForGame(
-          versionId,
-          onLog: pushLog,
-          javaMajorFromMeta: metaJava,
-        );
+        if (MobileLaunchLimits.isMobile) {
+          pushLog(MobileLaunchLimits.javaSkipDesktopJdk);
+        } else {
+          pushLog('准备隔离 Java（失败不影响已下好的本体）…');
+          if (!mounted) return true;
+          final metaJava = await VersionInstaller.peekDeclaredJavaMajor(
+            root,
+            versionId,
+          );
+          await JavaEnvAdapter(cfg, context.read<JavaRuntime>())
+              .ensureIsolatedForGame(
+            versionId,
+            onLog: pushLog,
+            javaMajorFromMeta: metaJava,
+          );
+        }
       } catch (e) {
         pushLog('隔离 Java 未完成: $e（可稍后在性能中心安装）');
       }

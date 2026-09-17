@@ -3,7 +3,7 @@
 ; 品牌：Setup 图标 + 向导左右侧 Logo 图
 
 #define MyAppName "星穹次元启动器"
-#define MyAppVersion "0.2.4"
+#define MyAppVersion "0.2.5"
 #define MyAppPublisher "星穹次元 / M-Starry-Sky"
 #define MyAppURL "https://github.com/M-Starry-Sky/Launcher"
 #define MyAppExeName "xingqiong_launcher.exe"

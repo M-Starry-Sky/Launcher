@@ -86,8 +86,12 @@ class BedrockLauncher {
 
   /// 启动本机已安装的基岩版。
   Future<void> launch(BedrockInstallInfo install) async {
+    if (Platform.isAndroid) {
+      await _launchAndroid(install);
+      return;
+    }
     if (!Platform.isWindows) {
-      throw StateError('当前仅支持在 Windows 上启动基岩版');
+      throw StateError('当前平台暂不支持启动基岩版（请用 Windows 或 Android）');
     }
     _log('正在启动 ${install.label}…');
 
@@ -108,6 +112,49 @@ class BedrockLauncher {
     );
     // explorer 立即返回；无法用 exitCode 判断成败
     _log('${install.label} 已请求系统启动 (shell:$aumid, pid=${explorer.pid})');
+  }
+
+  Future<void> _launchAndroid(BedrockInstallInfo install) async {
+    _log('正在唤起 Android 基岩版（${install.packageFamilyName}）…');
+    // 优先显式 Activity，再退到包名 MAIN
+    final attempts = <List<String>>[
+      [
+        'start',
+        '-n',
+        '${install.packageFamilyName}/com.mojang.minecraftpe.MainActivity',
+      ],
+      [
+        'start',
+        '-a',
+        'android.intent.action.MAIN',
+        '-c',
+        'android.intent.category.LAUNCHER',
+        install.packageFamilyName,
+      ],
+      [
+        'start',
+        '-a',
+        'android.intent.action.VIEW',
+        '-d',
+        'minecraft://',
+      ],
+    ];
+    Object? last;
+    for (final args in attempts) {
+      try {
+        final r = await Process.run('am', args);
+        if (r.exitCode == 0) {
+          _log('基岩版已请求启动');
+          return;
+        }
+        last = 'am ${args.join(' ')} → exit ${r.exitCode} ${r.stderr}';
+      } catch (e) {
+        last = e;
+      }
+    }
+    throw StateError(
+      '无法启动基岩版，请确认已安装 Minecraft。详情: $last',
+    );
   }
 
   Future<bool> _tryStartUri(String uri) async {

@@ -5,7 +5,7 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $root
 Set-Location $root
 
-$version = '0.2.4'
+$version = '0.2.5'
 $env:PATH = 'E:\flutter\bin;' + $env:PATH
 $env:FLUTTER_STORAGE_BASE_URL = 'https://storage.flutter-io.cn'
 $env:PUB_HOSTED_URL = 'https://pub.flutter-io.cn'

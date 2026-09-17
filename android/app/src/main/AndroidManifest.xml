@@ -40,6 +40,14 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 内嵌 Java 版：全屏 + 虚拟按键 -->
+        <activity
+            android:name=".je.JeGameActivity"
+            android:exported="false"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
@@ -48,6 +56,23 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- 探测手机 Java 启动器（FCL / Zalith / Pojav，与其共用 JVM 方案） -->
+        <package android:name="com.tungsten.fcl"/>
+        <package android:name="com.tungsten.fclauncher"/>
+        <package android:name="com.movtery.zalithlauncher"/>
+        <package android:name="com.movtery.zalithlauncher2"/>
+        <package android:name="com.zalithlauncher"/>
+        <package android:name="net.kdt.pojavlaunch"/>
+        <package android:name="net.kdt.pojavlaunch.app"/>
+        <package android:name="net.kdt.pojavlaunch.free"/>
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
+            <category android:name="android.intent.category.LAUNCHER"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="market"/>
         </intent>
     </queries>
 </manifest>

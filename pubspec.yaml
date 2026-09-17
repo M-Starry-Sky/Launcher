@@ -1,7 +1,7 @@
 name: xingqiong_launcher
 description: 星穹次元启动器 —— 第三方非官方 Minecraft 辅助启动与联机隧道工具
 publish_to: "none"
-version: 0.2.4
+version: 0.2.5
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

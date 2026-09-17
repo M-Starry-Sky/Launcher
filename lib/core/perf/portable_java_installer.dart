@@ -48,8 +48,9 @@ class PortableJavaInstaller {
   Future<String> ensure(int major, {bool forceReinstall = false}) async {
     if (Platform.isAndroid || Platform.isIOS) {
       throw StateError(
-        '手机端无法安装/校验桌面 Java（java -version 不可用）。'
-        '请改用基岩版，或在电脑端启动 Java 版。',
+        '手机端不安装桌面 Temurin。'
+        'Java 版请通过 FCL/Zalith/Pojav 的 Android OpenJDK 运行'
+        '（与主流手机启动器相同方案）。',
       );
     }
     if (!forceReinstall) {
